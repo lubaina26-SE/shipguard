@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ShipGuard</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: Segoe UI, Arial, sans-serif; margin: 0; background: #0f172a; color: #e2e8f0; }
+    header { padding: 20px 32px; background: #1e293b; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #334155; }
+    header h1 { margin: 0; font-size: 22px; }
+    header small { color: #94a3b8; }
+    main { padding: 24px 32px; }
+    .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 16px; margin-bottom: 24px; }
+    .card { background: #1e293b; border: 1px solid #334155; border-radius: 10px; padding: 16px; }
+    .card .label { color: #94a3b8; font-size: 13px; }
+    .card .value { font-size: 30px; font-weight: bold; margin-top: 6px; }
+    .pill { display: inline-block; padding: 4px 12px; border-radius: 999px; font-size: 13px; font-weight: bold; margin-left: 8px; }
+    .up { background: #14532d; color: #86efac; }
+    .down { background: #7f1d1d; color: #fca5a5; }
+    .section { background: #1e293b; border: 1px solid #334155; border-radius: 10px; padding: 16px; margin-bottom: 24px; }
+    .section h3 { margin: 0 0 12px 0; font-size: 16px; }
+    #timeline { display: flex; gap: 6px; flex-wrap: wrap; }
+    .box { width: 22px; height: 22px; border-radius: 4px; }
+    .box.success { background: #22c55e; }
+    .box.failed { background: #ef4444; }
+    .box.rolled_back { background: #f59e0b; }
+    table { border-collapse: collapse; width: 100%; }
+    th, td { padding: 10px; text-align: left; border-bottom: 1px solid #334155; font-size: 14px; }
+    th { color: #94a3b8; font-weight: 600; }
+    .badge { padding: 3px 10px; border-radius: 6px; font-size: 12px; font-weight: bold; }
+    .badge.success { background: #14532d; color: #86efac; }
+    .badge.failed { background: #7f1d1d; color: #fca5a5; }
+    .badge.rolled_back { background: #78350f; color: #fcd34d; }
+    .vuln-high { color: #fca5a5; font-weight: bold; }
+    code { background: #0f172a; padding: 2px 6px; border-radius: 4px; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>ShipGuard <small>Release Dashboard</small></h1>
+    <div>
+      API <span id="p-api" class="pill down">...</span>
+      DB <span id="p-db" class="pill down">...</span>
+      Cache <span id="p-cache" class="pill down">...</span>
+    </div>
+  </header>
+  <main>
+    <div class="cards">
+      <div class="card"><div class="label">Total deployments</div><div class="value" id="c-total">0</div></div>
+      <div class="card"><div class="label">Success rate</div><div class="value" id="c-rate">0%</div></div>
+      <div class="card"><div class="label">Failed / Rolled back</div><div class="value" id="c-bad">0</div></div>
+      <div class="card"><div class="label">Latest image</div><div class="value" id="c-latest" style="font-size:20px">-</div></div>
+    </div>
+    <div class="section">
+      <h3>Last 20 deployments (newest first)</h3>
+      <div id="timeline"></div>
+    </div>
+    <div class="section">
+      <h3>Deployment history</h3>
+      <table>
+        <thead><tr><th>Commit</th><th>Image tag</th><th>Tests</th><th>Vulnerabilities</th><th>Status</th><th>Time</th></tr></thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
+    <small style="color:#64748b">Auto-refresh every 10 seconds. Data comes from the CI/CD pipeline.</small>
+  </main>
+  <script>
+    function pill(id, ok) {
+      const e = document.getElementById(id);
+      e.textContent = ok ? "UP" : "DOWN";
+      e.className = "pill " + (ok ? "up" : "down");
+    }
+    function cell(tr, text, cls) {
+      const td = document.createElement("td");
+      if (cls) {
+        const s = document.createElement("span");
+        s.className = cls;
+        s.textContent = text;
+        td.appendChild(s);
+      } else { td.textContent = text; }
+      tr.appendChild(td);
+    }
+    async function load() {
+      try {
+        const h = await fetch("/health");
+        const j = await h.json();
+        const b = j.detail || j;
+        pill("p-api", true);
+        pill("p-db", b.db === true);
+        pill("p-cache", b.cache === true);
+      } catch (e) { pill("p-api", false); pill("p-db", false); pill("p-cache", false); }
+      try {
+        const d = await (await fetch("/api/deployments")).json();
+        const ok = d.filter(x => x.status === "success").length;
+        document.getElementById("c-total").textContent = d.length;
+        document.getElementById("c-rate").textContent = d.length ? Math.round(ok * 100 / d.length) + "%" : "0%";
+        document.getElementById("c-bad").textContent = d.length - ok;
+        document.getElementById("c-latest").textContent = d.length ? d[0].image_tag : "-";
+        const tl = document.getElementById("timeline");
+        tl.textContent = "";
+        d.forEach(x => {
+          const bx = document.createElement("div");
+          bx.className = "box " + x.status;
+          bx.title = x.image_tag + " - " + x.status;
+          tl.appendChild(bx);
+        });
+        const body = document.getElementById("rows");
+        body.textContent = "";
+        d.forEach(x => {
+          const tr = document.createElement("tr");
+          cell(tr, x.commit_sha.slice(0, 7));
+          cell(tr, x.image_tag);
+          cell(tr, x.tests_passed ? "passed" : "failed");
+          cell(tr, x.vulnerabilities, x.vulnerabilities > 0 ? "vuln-high" : "");
+          cell(tr, x.status, "badge " + x.status);
+          cell(tr, x.created_at.slice(0, 19));
+          body.appendChild(tr);
+        });
+      } catch (e) {}
+    }
+    load();
+    setInterval(load, 10000);
+  </script>
+</body>
+</html>

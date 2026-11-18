@@ -1,0 +1,58 @@
+name: shipguard
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: shipguard
+      POSTGRES_USER: shipguard
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U shipguard -d shipguard"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    mem_limit: 384m
+    restart: unless-stopped
+
+  cache:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    mem_limit: 128m
+    restart: unless-stopped
+
+  api:
+    build: ./api
+    environment:
+      DB_HOST: db
+      DB_NAME: shipguard
+      DB_USER: shipguard
+      DB_PASSWORD: ${DB_PASSWORD}
+      REDIS_HOST: cache
+      INGEST_TOKEN: ${INGEST_TOKEN}
+    depends_on:
+      db:
+        condition: service_healthy
+      cache:
+        condition: service_healthy
+    mem_limit: 256m
+    restart: unless-stopped
+
+  web:
+    build: ./web
+    ports:
+      - "8080:80"
+    depends_on:
+      api:
+        condition: service_healthy
+    mem_limit: 64m
+    restart: unless-stopped
+
+volumes:
+  pgdata:
